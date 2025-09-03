@@ -1,4 +1,4 @@
-import sqlite
+import sqlite3
 import discord
 import datetime as dt
 from .config import DB_PATH, ROLE_ID, COLOR_BLACK
