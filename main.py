@@ -45,14 +45,17 @@ def parse_dt(s: str):
 intents = discord.Intents.default()
 intents.members = True  # 역할 부여/회수 위해 필요(개발자 포털에서도 멤버 인텐트 허용해야 함)
 bot = commands.Bot(command_prefix="!", intents=intents)
-BTN_STYLE = discord.ButtonStyle.secondary
 
 # ========================
-# 임베드 유틸 (검정색 통일)
+# 임베드 유틸 (검정색 통일 + 실시간 시간 옵션)
 # ========================
 COLOR_BLACK = discord.Color.from_rgb(0, 0, 0)
 
-def make_embed(title, desc="", color=COLOR_BLACK, fields=None):
+def make_embed(title, desc="", color=COLOR_BLACK, fields=None, show_time=False):
+    # show_time=True면 본문 아래에 디스코드 시간 토큰 삽입(자동 갱신)
+    if show_time:
+        epoch = int(now_utc().timestamp())
+        desc = f"{desc}\n\n<t:{epoch}:F> (<t:{epoch}:R>)"
     embed = discord.Embed(title=title, description=desc, color=color)
     if fields:
         for name, value, inline in fields:
@@ -237,7 +240,7 @@ async def before_license_cleanup_loop():
 # 모달: 라이선스 등록
 # ========================
 class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
-    code = discord.ui.TextInput(label="라이선스 코드", placeholder="Wind-Banner-XXXXX-XXXXX-XXXXX-7D")
+    code = discord.ui.TextInput(label="라이선스 코드", placeholder="라이선스 코드를 입력하세요.")
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -291,7 +294,6 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
 
 # ========================
 # 모달: 배너 설정(이모지┃배너명) + 채널 생성/역할 부여
-#  - 모달 제출 단계에서도 라이선스 유효성 재검증
 # ========================
 class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
     emoji = discord.ui.TextInput(label="이모지", placeholder="예) EMOJI_0  또는  <:custom:1234567890>", max_length=50, required=True)
@@ -386,18 +388,17 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
                 await interaction.response.send_message(embed=make_embed("오류", "저장/채널/역할 처리 중 오류가 발생했어요."), ephemeral=True)
 
 # ========================
-# 버튼 뷰(등록하기 - 설정하기 - 내정보)
-# 설정하기: 유효 라이선스 보유자만 가능(콜백에서 즉시 검증)
+# 버튼 뷰(라벨/색상 반영)
 # ========================
 class SimpleBannerView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # 퍼시스턴트 뷰
 
-    @discord.ui.button(label="등록하기", style=BTN_STYLE, custom_id="register", row=0)
+    @discord.ui.button(label="배너 등록", style=discord.ButtonStyle.success, custom_id="register", row=0)
     async def register_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(LicenseModal())
 
-    @discord.ui.button(label="설정하기", style=BTN_STYLE, custom_id="setting", row=0)
+    @discord.ui.button(label="배너 설정", style=discord.ButtonStyle.primary, custom_id="setting", row=0)
     async def setting_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         ok, lic_type, exp = has_active_license(interaction.user.id)
         if not ok:
@@ -415,7 +416,7 @@ class SimpleBannerView(discord.ui.View):
             )
         await interaction.response.send_modal(BannerSettingModal())
 
-    @discord.ui.button(label="내정보", style=BTN_STYLE, custom_id="info", row=0)
+    @discord.ui.button(label="내정보", style=discord.ButtonStyle.secondary, custom_id="info", row=0)
     async def info_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
@@ -457,7 +458,7 @@ class SimpleBannerView(discord.ui.View):
 @bot.tree.command(name="배너등록", description="상단 배너 등록하기")
 async def 배너등록(interaction: discord.Interaction):
     await interaction.response.send_message(
-        embed=make_embed("상단 배너 등록하기", "아래 버튼을 사용하세요.", COLOR_BLACK),
+        embed=make_embed("상단 배너 등록하기", "아래 버튼을 사용하세요.", COLOR_BLACK, show_time=True),
         view=SimpleBannerView()
     )
 
