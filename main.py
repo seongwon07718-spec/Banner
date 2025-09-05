@@ -222,7 +222,7 @@ async def before_license_cleanup_loop():
 # 모달: 라이선스 등록
 # ========================
 class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
-    code = discord.ui.TextInput(label="라이선스 코드", placeholder="Wind-Banner-XXXXX-XXXXX-XXXXX-7D")
+    code = discord.ui.TextInput(label="라이선스 코드", placeholder="라이선스 코드를 입력하세요")
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -369,7 +369,7 @@ class SimpleBannerView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="배너 등록", style=discord.ButtonStyle.success, custom_id="register", row=0)
+    @discord.ui.button(label="라센 등록", style=discord.ButtonStyle.success, custom_id="register", row=0)
     async def register_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(LicenseModal())
 
