@@ -15,10 +15,10 @@ import string
 # 환경설정
 # ========================
 TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = os.getenv("GUILD_ID")  # 선택: 길드 동기화 빠르게 하려면 숫자 넣기(따옴표 X)
+GUILD_ID = os.getenv("GUILD_ID")  # 선택: 특정 서버만 즉시 등록하려면 숫자(따옴표 X)
 DB_PATH = "licenses.db"
 
-# 네가 준 고정 ID
+# 고정 ID
 ROLE_ID = 1406434529198997586        # 설정 완료 시 부여/회수할 역할
 TARGET_ID = 1406431469664206963      # 카테고리 또는 텍스트채널 ID(자동 판별)
 
@@ -43,35 +43,30 @@ def parse_dt(s: str):
 # 디스코드 설정
 # ========================
 intents = discord.Intents.default()
-intents.members = True  # 역할 부여/회수 위해 필요(개발자 포털에서도 멤버 인텐트 허용해야 함)
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ========================
-# 임베드 유틸 (검정색 통일 + 실시간 시간 옵션)
+# 임베드 유틸(시간 표시 제거)
 # ========================
 COLOR_BLACK = discord.Color.from_rgb(0, 0, 0)
 
-def make_embed(title, desc="", color=COLOR_BLACK, fields=None, show_time=False):
-    # show_time=True면 본문 아래에 디스코드 시간 토큰 삽입(자동 갱신)
-    if show_time:
-        epoch = int(now_utc().timestamp())
-        desc = f"{desc}\n\n<t:{epoch}:F> (<t:{epoch}:R>)"
+def make_embed(title, desc="", color=COLOR_BLACK, fields=None):
     embed = discord.Embed(title=title, description=desc, color=color)
     if fields:
         for name, value, inline in fields:
             embed.add_field(name=name, value=value, inline=inline)
-    embed.timestamp = now_utc()
+    # embed.timestamp = now_utc()  # 시간 표시 제거
     return embed
 
 def build_channel_name(emoji, name):
-    return f"{emoji}{SEPARATOR}{name}"[:100]  # 채널명 최대 100자
+    return f"{emoji}{SEPARATOR}{name}"[:100]
 
 # ========================
 # DB 초기화
 # ========================
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS license_codes (
         code TEXT PRIMARY KEY,
@@ -107,8 +102,7 @@ def init_db():
         user_id INTEGER PRIMARY KEY,
         cleaned_at TEXT
     )""")
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 # ========================
 # 라이선스 헬퍼
@@ -118,8 +112,7 @@ def generate_license(lic_type):
     return f"Wind-Banner-{part}-{lic_type}"
 
 def get_license_row(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
     cur.execute("SELECT type, activated_at, expires_at FROM licenses WHERE user_id=?", (user_id,))
     row = cur.fetchone()
     conn.close()
@@ -140,11 +133,6 @@ def has_active_license(user_id):
     return exp > now_utc(), lic_type, exp
 
 async def resolve_category_and_announce(guild: discord.Guild):
-    """
-    TARGET_ID가 카테고리면: (category, None)
-    TARGET_ID가 텍스트채널이면: (그 채널의 상위 카테고리, 그 텍스트채널)
-    둘 다 아니면: (None, None)
-    """
     target = guild.get_channel(TARGET_ID)
     if target is None:
         return None, None
@@ -166,8 +154,7 @@ async def send_expire_dm(user, guild_name, expired_at):
 
 async def cleanup_expired_licenses():
     now = now_utc()
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
     cur.execute("""
         SELECT l.user_id, l.expires_at
         FROM licenses AS l
@@ -179,23 +166,19 @@ async def cleanup_expired_licenses():
     targets = cur.fetchall()
 
     if not targets:
-        conn.close()
-        return
+        conn.close(); return
 
     for user_id, expires_at in targets:
         try:
-            exp_fmt = "-"
             try:
                 exp_fmt = parse_dt(expires_at).strftime("%Y-%m-%d %H:%M") if expires_at else "-"
             except Exception:
                 exp_fmt = expires_at or "-"
 
-            # 처리 로그/라이선스 제거
             cur.execute("INSERT OR REPLACE INTO license_cleanup (user_id, cleaned_at) VALUES (?, ?)",
                         (user_id, now.isoformat()))
             cur.execute("DELETE FROM licenses WHERE user_id=?", (user_id,))
 
-            # 채널/역할 정리
             cur.execute("SELECT guild_id, channel_id FROM banner_channels WHERE user_id=?", (user_id,))
             row = cur.fetchone()
             if row:
@@ -218,7 +201,6 @@ async def cleanup_expired_licenses():
                     if member:
                         await send_expire_dm(member, guild.name, exp_fmt)
 
-                # 매핑 삭제
                 cur.execute("DELETE FROM banner_channels WHERE user_id=?", (user_id,))
 
             conn.commit()
@@ -240,7 +222,7 @@ async def before_license_cleanup_loop():
 # 모달: 라이선스 등록
 # ========================
 class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
-    code = discord.ui.TextInput(label="라이선스 코드", placeholder="라이선스 코드를 입력하세요.")
+    code = discord.ui.TextInput(label="라이선스 코드", placeholder="Wind-Banner-XXXXX-XXXXX-XXXXX-7D")
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -248,8 +230,7 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
             user_id = interaction.user.id
             now = now_utc()
 
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
+            conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
             cur.execute("SELECT type, used_by FROM license_codes WHERE code=?", (code,))
             row = cur.fetchone()
 
@@ -262,7 +243,6 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
                 conn.close()
                 return await interaction.response.send_message(embed=make_embed("라이선스 등록 실패", "이미 사용된 코드입니다."), ephemeral=True)
 
-            # 기간 설정
             if lic_type == "7D":
                 expires = now + dt.timedelta(days=7); lic_label = "7일"
             elif lic_type == "30D":
@@ -272,15 +252,13 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
             else:
                 expires = now + dt.timedelta(days=1); lic_label = "기타"
 
-            # 등록
             cur.execute(
                 "REPLACE INTO licenses (user_id, code, type, activated_at, expires_at) VALUES (?, ?, ?, ?, ?)",
                 (user_id, code, lic_label, now.isoformat(), expires.isoformat() if expires else None)
             )
             cur.execute("UPDATE license_codes SET used_by=?, used_at=? WHERE code=?",
                         (user_id, now.isoformat(), code))
-            conn.commit()
-            conn.close()
+            conn.commit(); conn.close()
 
             fields = [("종류", lic_label, True),
                       ("등록일", now.strftime("%Y-%m-%d %H:%M"), True),
@@ -293,7 +271,7 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
                 await interaction.response.send_message(embed=make_embed("오류", "등록 중 오류가 발생했습니다."), ephemeral=True)
 
 # ========================
-# 모달: 배너 설정(이모지┃배너명) + 채널 생성/역할 부여
+# 모달: 배너 설정
 # ========================
 class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
     emoji = discord.ui.TextInput(label="이모지", placeholder="예) EMOJI_0  또는  <:custom:1234567890>", max_length=50, required=True)
@@ -318,13 +296,11 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
             if category is None:
                 return await interaction.response.send_message(embed=make_embed("설정 오류", "지정한 ID에서 카테고리를 찾지 못했어요."), ephemeral=True)
 
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
+            conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
             cur.execute("REPLACE INTO banner_settings (user_id, emoji, banner_name, updated_at) VALUES (?, ?, ?, ?)",
                         (interaction.user.id, raw_emoji, name, now_utc().isoformat()))
             conn.commit()
 
-            # 기존 채널 조회
             cur.execute("SELECT channel_id FROM banner_channels WHERE user_id=? AND guild_id=?",
                         (interaction.user.id, guild.id))
             row = cur.fetchone()
@@ -355,7 +331,6 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
                             (interaction.user.id, guild.id, channel.id))
                 conn.commit()
 
-            # 역할 부여
             role = guild.get_role(ROLE_ID)
             role_msg = "역할 부여 실패(역할 확인 필요)"
             if role:
@@ -367,11 +342,11 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
 
             conn.close()
 
-            # 안내 채널 공지(선택)
             if announce_ch and isinstance(announce_ch, discord.TextChannel):
                 try:
                     pub = make_embed("배너 채널 생성/갱신", "", COLOR_BLACK,
                                      [("사용자", interaction.user.mention, True), ("채널", f"#{channel.name}", True)])
+                # noqa
                     await announce_ch.send(embed=pub)
                 except Exception as e:
                     print("announce:", e)
@@ -388,11 +363,11 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
                 await interaction.response.send_message(embed=make_embed("오류", "저장/채널/역할 처리 중 오류가 발생했어요."), ephemeral=True)
 
 # ========================
-# 버튼 뷰(라벨/색상 반영)
+# 버튼 뷰(라벨/색상)
 # ========================
 class SimpleBannerView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # 퍼시스턴트 뷰
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="배너 등록", style=discord.ButtonStyle.success, custom_id="register", row=0)
     async def register_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -458,11 +433,11 @@ class SimpleBannerView(discord.ui.View):
 @bot.tree.command(name="배너등록", description="상단 배너 등록하기")
 async def 배너등록(interaction: discord.Interaction):
     await interaction.response.send_message(
-        embed=make_embed("상단 배너 등록하기", "아래 버튼을 사용하세요.", COLOR_BLACK, show_time=True),
+        embed=make_embed("상단 배너 등록하기", "아래 버튼을 사용하세요.", COLOR_BLACK),
         view=SimpleBannerView()
     )
 
-# 관리자 전용 코드생성(유지)
+# 관리자 전용 코드생성(데코레이터로 정의만)
 @app_commands.command(name="코드생성", description="(관리자 전용) 라이선스 코드를 생성합니다")
 @app_commands.describe(기간="라이선스 기간을 선택하세요")
 @app_commands.choices(기간=[
@@ -478,14 +453,12 @@ async def 코드생성(interaction: discord.Interaction, 기간: app_commands.Ch
     try:
         lic_type = 기간.value
         code = generate_license(lic_type)
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
+        conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
         cur.execute(
             "INSERT OR REPLACE INTO license_codes (code, type, created_at, used_by, used_at) VALUES (?, ?, ?, NULL, NULL)",
             (code, lic_type, now_utc().isoformat())
         )
-        conn.commit()
-        conn.close()
+        conn.commit(); conn.close()
         label = "7일" if lic_type == "7D" else ("30일" if lic_type == "30D" else "영구")
         fields = [("기간", label, True), ("코드", f"`{code}`", False)]
         await interaction.response.send_message(embed=make_embed("라이선스 코드 생성", "", COLOR_BLACK, fields), ephemeral=True)
@@ -493,30 +466,56 @@ async def 코드생성(interaction: discord.Interaction, 기간: app_commands.Ch
         print("코드생성:", e)
         await interaction.response.send_message(embed=make_embed("오류", "코드 생성 중 오류가 발생했습니다."), ephemeral=True)
 
-# 트리 등록
-if GUILD_ID:
-    guild_obj = discord.Object(id=int(GUILD_ID))
-    bot.tree.add_command(코드생성, guild=guild_obj)
-else:
-    bot.tree.add_command(코드생성)
+# 주의: 여기서 더 이상 트리 등록을 전역으로 하지 않음(중복 원인)
 
 # ========================
-# 실행
+# 실행 / 동기화
 # ========================
 @bot.event
 async def on_ready():
     init_db()
-    bot.add_view(SimpleBannerView())  # 퍼시스턴트 뷰 등록
+    bot.add_view(SimpleBannerView())
 
     try:
+        # 1) 글로벌에서 '코드생성' 제거 → 글로벌 싱크(배너등록은 유지)
+        try:
+            bot.tree.remove_command("코드생성")
+        except Exception as e:
+            print("[TREE] remove 코드생성:", e)
+        try:
+            await bot.tree.sync()  # 글로벌에서 제거 반영
+            print("[SYNC][GLOBAL] 완료(코드생성 제거 반영)")
+        except Exception as e:
+            print("[SYNC][GLOBAL] 실패:", e)
+
+        # 2) 길드 전용으로 '코드생성' 추가 후 길드 싱크
         if GUILD_ID:
-            synced = await bot.tree.sync(guild=discord.Object(id=int(GUILD_ID)))
-            print(f"길드 슬래시 명령 동기화 완료: {len(synced)}개 (GUILD_ID={GUILD_ID})")
+            gid = int(GUILD_ID)
+            try:
+                bot.tree.add_command(코드생성, guild=discord.Object(id=gid))
+            except Exception as e:
+                print("[TREE] add 코드생성(guild) 실패:", e)
+            try:
+                synced = await bot.tree.sync(guild=discord.Object(id=gid))
+                print(f"[SYNC][GUILD] {gid}: {len(synced)}개")
+            except Exception as e:
+                print("[SYNC][GUILD] 실패:", e)
         else:
-            synced = await bot.tree.sync()
-            print(f"글로벌 슬래시 명령 동기화 완료: {len(synced)}개 (전파에 수 분 소요될 수 있음)")
+            total = 0
+            for g in bot.guilds:
+                try:
+                    bot.tree.add_command(코드생성, guild=discord.Object(id=g.id))
+                except Exception as e:
+                    print(f"[TREE] add 코드생성 {g.id} 실패:", e)
+                try:
+                    synced = await bot.tree.sync(guild=discord.Object(id=g.id))
+                    print(f"[SYNC][GUILD] {g.name}({g.id}): {len(synced)}개")
+                    total += len(synced)
+                except Exception as e:
+                    print(f"[SYNC][GUILD] {g.id} 실패:", e)
+            print(f"[SYNC] 길드 합계: {total}개")
     except Exception as e:
-        print("슬래시 동기화 실패:", e)
+        print("슬래시 동기화 전체 실패:", e)
 
     if not license_cleanup_loop.is_running():
         license_cleanup_loop.start()
