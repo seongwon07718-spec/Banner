@@ -22,7 +22,7 @@ DB_PATH = "licenses.db"
 ROLE_ID = 1406434529198997586        # 설정 완료 시 부여/회수할 역할
 TARGET_ID = 1406431469664206963      # 카테고리 또는 텍스트채널 ID(자동 판별)
 
-SEPARATOR = "┃"  # 채널명 구분자
+SEPARATOR = "⠐"  # 채널명 구분자
 
 # ========================
 # 시간 유틸(UTC)
@@ -60,7 +60,8 @@ def make_embed(title, desc="", color=COLOR_BLACK, fields=None):
     return embed
 
 def build_channel_name(emoji, name):
-    return f"{emoji}{SEPARATOR}{name}"[:100]
+    # 『emoji⠐name』 형태, 길이 제한 100
+    return f"『{emoji}{SEPARATOR}{name}』"[:100]
 
 # ========================
 # DB 초기화
@@ -236,12 +237,16 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
 
             if not row:
                 conn.close()
-                return await interaction.response.send_message(embed=make_embed("라이선스 등록 실패", "존재하지 않는 코드입니다."), ephemeral=True)
+                return await interaction.response.send_message(
+                    embed=make_embed("라이선스 등록 실패", "존재하지 않는 코드입니다."), ephemeral=True
+                )
 
             lic_type, used_by = row
             if used_by is not None:
                 conn.close()
-                return await interaction.response.send_message(embed=make_embed("라이선스 등록 실패", "이미 사용된 코드입니다."), ephemeral=True)
+                return await interaction.response.send_message(
+                    embed=make_embed("라이선스 등록 실패", "이미 사용된 코드입니다."), ephemeral=True
+                )
 
             if lic_type == "7D":
                 expires = now + dt.timedelta(days=7); lic_label = "7일"
@@ -263,12 +268,16 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
             fields = [("종류", lic_label, True),
                       ("등록일", now.strftime("%Y-%m-%d %H:%M"), True),
                       ("만료일", parse_dt(expires.isoformat()).strftime("%Y-%m-%d %H:%M") if expires else "해당 없음", True)]
-            await interaction.response.send_message(embed=make_embed("라이선스 등록 완료", "", COLOR_BLACK, fields), ephemeral=True)
+            await interaction.response.send_message(
+                embed=make_embed("라이선스 등록 완료", "", COLOR_BLACK, fields), ephemeral=True
+            )
 
         except Exception as e:
             print("LicenseModal:", e)
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=make_embed("오류", "등록 중 오류가 발생했습니다."), ephemeral=True)
+                await interaction.response.send_message(
+                    embed=make_embed("오류", "등록 중 오류가 발생했습니다."), ephemeral=True
+                )
 
 # ========================
 # 모달: 배너 설정 (카테고리 권한 동기화만)
@@ -281,20 +290,28 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
         try:
             ok, _, _ = has_active_license(interaction.user.id)
             if not ok:
-                return await interaction.response.send_message(embed=make_embed("권한 없음", "유효한 라이선스가 있어야 배너를 설정할 수 있어요."), ephemeral=True)
+                return await interaction.response.send_message(
+                    embed=make_embed("권한 없음", "유효한 라이선스가 있어야 배너를 설정할 수 있어요."), ephemeral=True
+                )
 
             guild = interaction.guild
             if guild is None:
-                return await interaction.response.send_message(embed=make_embed("실행 불가", "길드에서만 사용할 수 있어요."), ephemeral=True)
+                return await interaction.response.send_message(
+                    embed=make_embed("실행 불가", "길드에서만 사용할 수 있어요."), ephemeral=True
+                )
 
             raw_emoji = str(self.emoji).strip()
             name = str(self.banner_name).strip()
             if not name:
-                return await interaction.response.send_message(embed=make_embed("입력 오류", "배너명은 비울 수 없어요."), ephemeral=True)
+                return await interaction.response.send_message(
+                    embed=make_embed("입력 오류", "배너명은 비울 수 없어요."), ephemeral=True
+                )
 
             category, announce_ch = await resolve_category_and_announce(guild)
             if category is None:
-                return await interaction.response.send_message(embed=make_embed("설정 오류", "지정한 ID에서 카테고리를 찾지 못했어요."), ephemeral=True)
+                return await interaction.response.send_message(
+                    embed=make_embed("설정 오류", "지정한 ID에서 카테고리를 찾지 못했어요."), ephemeral=True
+                )
 
             conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
             cur.execute("REPLACE INTO banner_settings (user_id, emoji, banner_name, updated_at) VALUES (?, ?, ?, ?)",
@@ -357,15 +374,21 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
                     print("announce:", e)
 
             fields = [("채널", f"#{channel.name}", True), ("역할 처리", role_msg, True), ("입력값", f"{raw_emoji} / {name}", False)]
-            await interaction.response.send_message(embed=make_embed("배너 설정 저장 완료", "", COLOR_BLACK, fields), ephemeral=True)
+            await interaction.response.send_message(
+                embed=make_embed("배너 설정 저장 완료", "", COLOR_BLACK, fields), ephemeral=True
+            )
 
         except discord.Forbidden:
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=make_embed("권한 부족", "채널/역할을 관리할 권한이 없어요."), ephemeral=True)
+                await interaction.response.send_message(
+                    embed=make_embed("권한 부족", "채널/역할을 관리할 권한이 없어요."), ephemeral=True
+                )
         except Exception as e:
             print("BannerSettingModal:", e)
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=make_embed("오류", "저장/채널/역할 처리 중 오류가 발생했어요."), ephemeral=True)
+                await interaction.response.send_message(
+                    embed=make_embed("오류", "저장/채널/역할 처리 중 오류가 발생했어요."), ephemeral=True
+                )
 
 # ========================
 # 버튼 뷰(라벨/색상)
@@ -402,7 +425,9 @@ class SimpleBannerView(discord.ui.View):
         try:
             row = get_license_row(interaction.user.id)
             if not row:
-                return await interaction.followup.send(embed=make_embed("라이선스 없음", "등록된 라이선스가 없습니다."), ephemeral=True)
+                return await interaction.followup.send(
+                    embed=make_embed("라이선스 없음", "등록된 라이선스가 없습니다."), ephemeral=True
+                )
 
             lic_type, activated_at, expires_at = row
             act_fmt = parse_dt(activated_at).strftime("%Y-%m-%d %H:%M") if activated_at else "-"
@@ -430,7 +455,9 @@ class SimpleBannerView(discord.ui.View):
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             print("info_button:", e)
-            await interaction.followup.send(embed=make_embed("오류", "처리 중 오류가 발생했습니다."), ephemeral=True)
+            await interaction.followup.send(
+                embed=make_embed("오류", "처리 중 오류가 발생했습니다."), ephemeral=True
+            )
 
 # ========================
 # 슬래시 명령어
@@ -466,10 +493,14 @@ async def 코드생성(interaction: discord.Interaction, 기간: app_commands.Ch
         conn.commit(); conn.close()
         label = "7일" if lic_type == "7D" else ("30일" if lic_type == "30D" else "영구")
         fields = [("기간", label, True), ("코드", f"`{code}`", False)]
-        await interaction.response.send_message(embed=make_embed("라이선스 코드 생성", "", COLOR_BLACK, fields), ephemeral=True)
+        await interaction.response.send_message(
+            embed=make_embed("라이선스 코드 생성", "", COLOR_BLACK, fields), ephemeral=True
+        )
     except Exception as e:
         print("코드생성:", e)
-        await interaction.response.send_message(embed=make_embed("오류", "코드 생성 중 오류가 발생했습니다."), ephemeral=True)
+        await interaction.response.send_message(
+            embed=make_embed("오류", "코드 생성 중 오류가 발생했습니다."), ephemeral=True
+        )
 
 # 주의: 여기서 더 이상 트리 등록을 전역으로 하지 않음(중복 원인)
 
