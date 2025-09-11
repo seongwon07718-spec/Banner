@@ -271,7 +271,7 @@ class LicenseModal(discord.ui.Modal, title="라이선스 등록"):
                 await interaction.response.send_message(embed=make_embed("오류", "등록 중 오류가 발생했습니다."), ephemeral=True)
 
 # ========================
-# 모달: 배너 설정
+# 모달: 배너 설정 (카테고리 권한 동기화만)
 # ========================
 class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
     emoji = discord.ui.TextInput(label="이모지", placeholder="예) EMOJI_0  또는  <:custom:1234567890>", max_length=50, required=True)
@@ -306,31 +306,37 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
             row = cur.fetchone()
 
             channel_name = build_channel_name(raw_emoji, name)
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-            }
 
             if row:
                 ch_id = row[0]
                 channel = guild.get_channel(ch_id)
                 if channel is None:
-                    channel = await guild.create_text_channel(channel_name, category=category, overwrites=overwrites)
+                    channel = await guild.create_text_channel(channel_name, category=category)
+                    try:
+                        await channel.edit(sync_permissions=True)
+                    except Exception as e:
+                        print("channel.sync_permissions(create):", e)
+
                     cur.execute("REPLACE INTO banner_channels (user_id, guild_id, channel_id) VALUES (?, ?, ?)",
                                 (interaction.user.id, guild.id, channel.id))
                     conn.commit()
                 else:
                     try:
-                        await channel.edit(name=channel_name, category=category, overwrites=overwrites)
+                        await channel.edit(name=channel_name, category=category, sync_permissions=True)
                     except Exception as e:
-                        print("channel.edit:", e)
-                        await channel.edit(overwrites=overwrites)
+                        print("channel.edit(sync):", e)
             else:
-                channel = await guild.create_text_channel(channel_name, category=category, overwrites=overwrites)
+                channel = await guild.create_text_channel(channel_name, category=category)
+                try:
+                    await channel.edit(sync_permissions=True)
+                except Exception as e:
+                    print("channel.sync_permissions(create-new):", e)
+
                 cur.execute("INSERT OR REPLACE INTO banner_channels (user_id, guild_id, channel_id) VALUES (?, ?, ?)",
                             (interaction.user.id, guild.id, channel.id))
                 conn.commit()
 
+            # 역할 부여는 유지(권한은 카테고리에서 관리)
             role = guild.get_role(ROLE_ID)
             role_msg = "역할 부여 실패(역할 확인 필요)"
             if role:
@@ -346,7 +352,6 @@ class BannerSettingModal(discord.ui.Modal, title="배너 설정"):
                 try:
                     pub = make_embed("배너 채널 생성/갱신", "", COLOR_BLACK,
                                      [("사용자", interaction.user.mention, True), ("채널", f"#{channel.name}", True)])
-                # noqa
                     await announce_ch.send(embed=pub)
                 except Exception as e:
                     print("announce:", e)
