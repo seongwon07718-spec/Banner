@@ -1,6 +1,9 @@
 import os
 import asyncio
 import re
+import subprocess
+import signal
+
 from typing import Optional
 
 import discord
@@ -8,16 +11,12 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from fastapi import FastAPI
-import subprocess
-import signal
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
-# =========================
-# 환경변수
-# =========================
+# ===== 환경변수 =====
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 GUILD_ID = int(os.getenv("GUILD_ID", "0") or 0)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
@@ -27,9 +26,7 @@ BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data.db")
 PORT = int(os.getenv("PORT", "8000"))
 
-# =========================
-# DB 세팅
-# =========================
+# ===== DB 세팅 =====
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -77,9 +74,7 @@ class Setting(Base):
 def init_db():
     Base.metadata.create_all(bind=engine)
 
-# =========================
-# 서비스 유틸
-# =========================
+# ===== 서비스 유틸 =====
 def db_session() -> Session:
     return SessionLocal()
 
@@ -121,18 +116,14 @@ def dec_stock_exact(db: Session, need: int) -> tuple[bool, str]:
     db.commit()
     return True, "OK"
 
-# =========================
-# FastAPI (헬스체크만)
-# =========================
+# ===== FastAPI (/health) =====
 api = FastAPI()
 
 @api.get("/health")
 def health():
     return {"ok": True}
 
-# =========================
-# Discord Bot 세팅
-# =========================
+# ===== Discord Bot =====
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -165,10 +156,13 @@ def make_panel_embed() -> discord.Embed:
 @bot.event
 async def on_ready():
     init_db()
-    if GUILD_ID:
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    else:
-        await bot.tree.sync()
+    try:
+        if GUILD_ID:
+            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        else:
+            await bot.tree.sync()
+    except Exception:
+        pass
     if not refresh_stock_task.is_running():
         refresh_stock_task.start()
     print(f"✅ 봇 로그인 성공: {bot.user}")
@@ -191,18 +185,15 @@ async def refresh_stock_task():
     finally:
         db.close()
 
-# ========== 슬래시 ==========
+# ===== 슬래시 명령 =====
 @bot.tree.command(name="버튼패널", description="로벅스 패널 게시 (관리자 전용)")
 @app_commands.check(lambda i: is_admin(i))
 async def cmd_panel(interaction: discord.Interaction):
-    # 화면에 상호작용창 안 보이게: 즉시 무음 ACK
     try:
         await interaction.response.defer(thinking=False, ephemeral=False)
     except:
         pass
 
-    # 버튼 패널 구성
-    # discord.py 2.x의 components 대신 View 사용
     class PanelView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
@@ -242,7 +233,6 @@ async def cmd_manual_topup(interaction: discord.Interaction, 유저: discord.Use
         db.commit()
     finally:
         db.close()
-    # 상호작용창 없이 DM 통지
     try:
         await 유저.send(f"{금액:,}원 충전 완료! 현재 잔액이 반영됐어.")
     except:
@@ -279,7 +269,6 @@ async def cmd_add_stock(interaction: discord.Interaction, 수량: int, 모드: a
     db = db_session()
     try:
         set_or_inc_stock(db, 수량, mode=모드.value)
-        # 패널 메시지가 있으면 즉시도 갱신
         s = get_settings(db)
         if s.panel_channel_id and s.panel_message_id:
             ch = bot.get_channel(int(s.panel_channel_id)) or await bot.fetch_channel(int(s.panel_channel_id))
@@ -288,21 +277,18 @@ async def cmd_add_stock(interaction: discord.Interaction, 수량: int, 모드: a
     finally:
         db.close()
 
-# ========== 컴포넌트/모달/DM ==========
+# ===== 컴포넌트/모달/DM =====
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     if interaction.type != discord.InteractionType.component:
         return
     cid = interaction.data.get("custom_id")
-
-    # 상호작용창 안 뜨게: 무음 ACK
     try:
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=False, ephemeral=False)
     except:
         pass
 
-    # 내 정보 → DM만
     if cid == "myinfo":
         db = db_session()
         try:
@@ -317,9 +303,7 @@ async def on_interaction(interaction: discord.Interaction):
             pass
         return
 
-    # 충전 버튼 → DM 모달 링크 없이 바로 DM 안내 + 계좌 모달로 전환 어려우므로 상호작용 모달 사용(필수 ACK)
     if cid == "topup":
-        # 모달은 상호작용 UI라 아주 잠깐 뜰 수밖에 없음(디코 정책). 제출 후 결과 알림은 DM/보안채널.
         class BankModal(discord.ui.Modal, title="계좌이체 신청"):
             depositor = discord.ui.TextInput(label="입금자명", placeholder="예: 홍길동", required=True, max_length=32)
             amount = discord.ui.TextInput(label="충전금액(원)", placeholder="예: 30000", required=True, max_length=12)
@@ -339,7 +323,6 @@ async def on_interaction(interaction: discord.Interaction):
                 finally:
                     db2.close()
 
-                # 모달 응답은 최소 표시, 실제 안내는 DM
                 await i2.response.send_message("신청 접수 완료! DM 확인해줘.", ephemeral=True)
                 try:
                     await i2.user.send(f"계좌 정보:\n{bank_info}\n승인까지 잠시만 기다려줘.")
@@ -412,7 +395,7 @@ async def on_interaction(interaction: discord.Interaction):
                     pass
         return await interaction.response.send_modal(BuyModal())
 
-# ========== DM 숫자 수신 ==========
+# ===== DM 숫자 수신 =====
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
@@ -485,7 +468,7 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-# 후기 모달
+# 후기 모달 트리거
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     if interaction.type == discord.InteractionType.component:
@@ -515,9 +498,7 @@ async def on_interaction(interaction: discord.Interaction):
                         await i2.response.send_message("후기 웹훅이 설정되지 않았어.", ephemeral=True)
             return await interaction.response.send_modal(ReviewModal())
 
-# =========================
-# 실행 관리
-# =========================
+# ===== 실행 =====
 def run_web_background():
     # uvicorn PATH 이슈 회피: python -m으로 실행
     cmd = ["python", "-m", "uvicorn", "main:api", "--host", "0.0.0.0", "--port", str(PORT)]
