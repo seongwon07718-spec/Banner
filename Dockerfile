@@ -1,2 +1,1 @@
-WORKDIR /work, main.py 하나만 실행
-CMD: uvicorn + python main.py 동시에
+  CMD sh -c "python -m uvicorn main:api --host 0.0.0.0 --port ${PORT:-8000} & python -u main.py"
