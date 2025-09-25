@@ -9,7 +9,6 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-```
 
 ### services.py
 ```python
