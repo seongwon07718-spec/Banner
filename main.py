@@ -1,10 +1,4 @@
-# -*- coding: utf-8 -*-
-import os
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-import discord
-from discord.ext import commands, tasks
+rt commands, tasks
 from discord import app_commands
 import sqlite3
 import datetime as dt
