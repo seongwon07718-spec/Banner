@@ -236,7 +236,7 @@ async def on_interaction(interaction: discord.Interaction):
                 db.commit()
                 try:
                     user = await bot.fetch_user(int(t.discord_id))
-                    await user.send("충전 요청이 거부되었어. 문의는 티켓으로 부탁해!")
+                    await user.send("충전 요청이 거부되었어. 문의는 티켓으로 부탁해")
                 except:
                     pass
                 await interaction.response.edit_message(embed=discord.Embed(
