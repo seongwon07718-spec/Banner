@@ -33,7 +33,7 @@ def get_settings(db: Session) -> Setting:
 def stock_summary_text(db: Session) -> str:
     s = get_settings(db)
     inner = f"총 재고: {s.total_stock_rbx} R$"
-    return f"재고 : ```{inner}```\n아래 버튼을 눌려 이용해 주세요"
+    return f"재고 : **{inner}**\n아래 버튼을 눌려 이용해 주세요"
 
 def set_or_inc_stock(db: Session, value: int, mode: str = "set"):
     s = get_settings(db)
