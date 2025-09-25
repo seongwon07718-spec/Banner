@@ -38,7 +38,7 @@ def make_panel_embed():
         color=0x2b6cb0
     )
 
-@bot.event
+@bot.even
 async def on_ready():
     init_db()
     if GUILD_ID:
