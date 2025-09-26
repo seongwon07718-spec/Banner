@@ -1,4 +1,4 @@
-import os, re, asyncio, traceback
+import os, asyncio, traceback, re
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -14,7 +14,10 @@ SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
 REVIEW_WEBHOOK_URL = os.getenv("REVIEW_WEBHOOK_URL", "")
 BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data.db")
+
+# DB는 영구 볼륨(/data)에 저장
+DB_PATH = os.getenv("DB_PATH", "/data/data.db")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
 # ===== DB =====
 Base = declarative_base()
@@ -288,8 +291,6 @@ async def on_interaction(inter: discord.Interaction):
     if inter.type != discord.InteractionType.component:
         return
     cid = inter.data.get("custom_id", "")
-
-    # 즉시 ACK (본인만 보기)
     await safe_ack(inter, ephemeral=True)
 
     if cid == "myinfo":
