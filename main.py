@@ -14,9 +14,9 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
-# ================= 환경변수 =================
+# ========= 환경변수 =========
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-GUILD_ID = int(os.getenv("GUILD_ID", "0") or 0)
+GUILD_ID = int(os.getenv("GUILD_ID", "0") or 0)  # 길드 고정(선택)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
 SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
 REVIEW_WEBHOOK_URL = os.getenv("REVIEW_WEBHOOK_URL", "")
@@ -24,7 +24,7 @@ BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data.db")
 PORT = int(os.getenv("PORT", "8000"))
 
-# ================= DB =================
+# ========= DB =========
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -112,14 +112,13 @@ def dec_stock_exact(s: Session, need: int) -> tuple[bool, str]:
     s.commit()
     return True, "OK"
 
-# ================= FastAPI =================
+# ========= FastAPI =========
 api = FastAPI()
-
 @api.get("/health")
 def health():
     return {"ok": True}
 
-# ================= Discord Bot =================
+# ========= Discord Bot =========
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -146,28 +145,43 @@ def make_panel_embed() -> discord.Embed:
     finally:
         s.close()
 
+# ========= 심플·탄탄 길드/글로벌 동기화 =========
 async def sync_guild_commands():
-    if not GUILD_ID:
-        await bot.tree.sync()
-        print("✅ 글로벌 커맨드 동기화 완료")
-        return
-    guild = discord.Object(id=GUILD_ID)
-    try:
-        bot.tree.clear_commands(guild=guild)  # 길드 잔여 커맨드 제거
-        for cmd in bot.tree.get_commands():
-            cmd.guild_ids = [GUILD_ID]
-        await bot.tree.sync(guild=guild)
-        print(f"✅ 길드 커맨드 동기화 완료: {GUILD_ID}")
-    except Exception as e:
-        print(f"⚠️ 길드 동기화 실패: {e}")
+    # 1) 길드 우선 동기화
+    if GUILD_ID:
+        guild = discord.Object(id=GUILD_ID)
         try:
+            await bot.tree.sync(guild=guild)
+            print(f"✅ 길드 동기화 성공: {GUILD_ID}")
+            return
+        except Exception as e:
+            print(f"⚠️ 길드 동기화 실패 → 글로벌 폴백 진행: {e}")
+
+    # 2) 글로벌 폴백
+    try:
+        await bot.tree.sync()
+        print("✅ 글로벌 동기화 성공")
+        return
+    except Exception as e:
+        print(f"⚠️ 글로벌 동기화 실패 → 재시도 1회: {e}")
+
+    # 3) 아주 짧은 재시도(네트워크/권한 타이밍 이슈 대비)
+    await asyncio.sleep(2)
+    try:
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            await bot.tree.sync(guild=guild)
+            print(f"✅ 길드 동기화 재시도 성공: {GUILD_ID}")
+        else:
             await bot.tree.sync()
-        except:
-            pass
+            print("✅ 글로벌 동기화 재시도 성공")
+    except Exception as e:
+        print(f"❌ 최종 동기화 실패: {e}")
 
 @bot.event
 async def on_ready():
     init_db()
+    # 데코레이터(@bot.tree.command)로 등록된 커맨드들을 실제로 노출시키기 위해 반드시 sync 호출
     await sync_guild_commands()
     if not refresh_task.is_running():
         refresh_task.start()
@@ -191,7 +205,7 @@ async def refresh_task():
     finally:
         s.close()
 
-# ================= Slash Commands =================
+# ========= Slash Commands =========
 @bot.tree.command(name="버튼패널", description="로벅스 패널 게시 (관리자 전용)")
 @app_commands.check(lambda i: is_admin(i))
 async def 버튼패널(inter: discord.Interaction):
@@ -282,7 +296,7 @@ async def 재고추가(inter: discord.Interaction, 수량: int, 모드: app_comm
     finally:
         s.close()
 
-# ================= Components / Modals / DM =================
+# ========= Components / Modals / DM =========
 @bot.event
 async def on_interaction(inter: discord.Interaction):
     if inter.type != discord.InteractionType.component:
@@ -400,7 +414,7 @@ async def on_interaction(inter: discord.Interaction):
                     pass
         return await inter.response.send_modal(BuyModal())
 
-# ================= DM 숫자 처리 =================
+# ========= DM 숫자 처리 =========
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
@@ -469,7 +483,7 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-# ================= 실행(uvicorn 모듈 방식) =================
+# ========= 실행(uvicorn 모듈 방식) =========
 def run_web_bg():
     cmd = ["python", "-m", "uvicorn", "main:api", "--host", "0.0.0.0", "--port", str(PORT)]
     return subprocess.Popen(cmd)
@@ -496,5 +510,3 @@ if __name__ == "__main__":
         asyncio.run(main_async())
     except KeyboardInterrupt:
         pass
-
----
