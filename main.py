@@ -1,4 +1,4 @@
-import os, asyncio, traceback, re
+import os, sys, asyncio, traceback, logging, re
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -7,15 +7,18 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
-# ===== 고정/환경 ====
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+print(">>> main.py booting...")
+
+# ===== 환경/고정 =====
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-GUILD_ID = 1419200424636055592
+GUILD_ID = 1419200424636055592  # 길드 고정
 SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
 REVIEW_WEBHOOK_URL = os.getenv("REVIEW_WEBHOOK_URL", "")
 BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
 
-# DB는 영구 볼륨(/data)에 저장
+# 영구 DB: /data 마운트 전제
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
@@ -65,6 +68,10 @@ class Setting(Base):
     total_stock_rbx = Column(Integer, default=0)
 
 def init_db():
+    try:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    except Exception:
+        pass
     Base.metadata.create_all(bind=engine)
 
 def db() -> Session:
@@ -100,16 +107,8 @@ def set_or_inc_stock(s: Session, value: int, mode: str = "set"):
         raise ValueError("mode must be set|inc|dec")
     s.commit()
 
-def dec_stock_exact(s: Session, need: int) -> tuple[bool, str]:
-    st = get_settings(s)
-    cur = int(st.total_stock_rbx or 0)
-    if need <= 0:
-        return False, "요청 수량이 0 이하야."
-    if cur < need:
-        return False, f"재고 부족. 현재 {cur} R$"
-    st.total_stock_rbx = cur - need
-    s.commit()
-    return True, "OK"
+def emb(title: str, desc: str, color: int = 0x2b6cb0) -> discord.Embed:
+    return discord.Embed(title=title, description=desc, color=color)
 
 # ===== FastAPI =====
 api = FastAPI()
@@ -130,18 +129,14 @@ def is_admin(inter: discord.Interaction) -> bool:
         if ADMIN_ROLE_ID:
             rid = int(ADMIN_ROLE_ID)
             return any(getattr(r, "id", None) == rid for r in getattr(inter.user, "roles", []))
-    except:
+    except Exception:
         pass
     return False
-
-def E(title: str, desc: str, color: int = 0x2b6cb0) -> discord.Embed:
-    return discord.Embed(title=title, description=desc, color=color)
 
 def panel_embed() -> discord.Embed:
     s = db()
     try:
-        desc = f"재고 안내\n```{stock_text(s)}```\n아래 버튼으로 이용해줘."
-        return E("[ 24 ] 로벅스 자판기", desc)
+        return emb("[ 24 ] 로벅스 자판기", f"재고 안내\n```{stock_text(s)}```\n아래 버튼으로 이용해줘.")
     finally:
         s.close()
 
@@ -160,7 +155,7 @@ async def safe_ack(inter: discord.Interaction, ephemeral: bool = True):
         pass
 
 async def send_embed(inter: discord.Interaction, title: str, desc: str, ephemeral: bool = True, color: int = 0x2b6cb0):
-    e = E(title, desc, color)
+    e = emb(title, desc, color)
     try:
         if inter.response.is_done():
             await inter.followup.send(embed=e, ephemeral=ephemeral)
@@ -169,29 +164,34 @@ async def send_embed(inter: discord.Interaction, title: str, desc: str, ephemera
     except Exception:
         try:
             await inter.followup.send(embed=e, ephemeral=ephemeral)
-        except:
-            pass
+        except Exception:
+            traceback.print_exc()
 
-# ===== 동기화/상태 =====
+# ===== 동기화 =====
 async def sync_guild_commands():
     try:
         cmds = await bot.tree.sync(guild=guild_obj)
         print(f"✅ 길드 동기화 성공: {GUILD_ID} (총 {len(cmds)}개)")
     except Exception as e:
+        traceback.print_exc()
         print(f"⚠️ 길드 동기화 실패 → 글로벌 폴백: {e}")
         try:
             cmds = await bot.tree.sync()
             print(f"✅ 글로벌 동기화 성공 (총 {len(cmds)}개)")
         except Exception as e2:
+            traceback.print_exc()
             print(f"❌ 최종 동기화 실패: {e2}")
 
 @bot.event
 async def on_ready():
-    init_db()
-    await sync_guild_commands()
-    if not refresh_task.is_running():
-        refresh_task.start()
-    print(f"✅ 봇 로그인 성공: {bot.user}")
+    try:
+        init_db()
+        await sync_guild_commands()
+        if not refresh_task.is_running():
+            refresh_task.start()
+        print(f"✅ 봇 로그인 성공: {bot.user}")
+    except Exception:
+        traceback.print_exc()
 
 @tasks.loop(seconds=60)
 async def refresh_task():
@@ -203,8 +203,8 @@ async def refresh_task():
         ch = bot.get_channel(int(st.panel_channel_id)) or await bot.fetch_channel(int(st.panel_channel_id))
         msg = await ch.fetch_message(int(st.panel_message_id))
         await msg.edit(embed=panel_embed(), view=build_panel_view())
-    except:
-        pass
+    except Exception:
+        traceback.print_exc()
     finally:
         s.close()
 
@@ -311,7 +311,7 @@ async def on_interaction(inter: discord.Interaction):
                 try:
                     amt = int(str(self.amount.value).replace(",", "").strip())
                 except:
-                    return await i2.response.send_message(embed=E("오류","금액 형식이 올바르지 않아.",0xff5555), ephemeral=True)
+                    return await i2.response.send_message(embed=emb("오류","금액 형식이 올바르지 않아.",0xff5555), ephemeral=True)
                 s2 = db()
                 try:
                     t = Topup(discord_id=str(i2.user.id), depositor_name=name, amount=amt, status="waiting")
@@ -321,10 +321,10 @@ async def on_interaction(inter: discord.Interaction):
                     secure_ch_id = int(st2.secure_channel_id or 0) or SECURE_CHANNEL_ID
                 finally:
                     s2.close()
-                await i2.response.send_message(embed=E("충전 신청 완료", bank_info), ephemeral=True)
+                await i2.response.send_message(embed=emb("충전 신청 완료", bank_info), ephemeral=True)
                 if secure_ch_id:
                     ch = bot.get_channel(secure_ch_id) or await bot.fetch_channel(secure_ch_id)
-                    await ch.send(embed=E("충전 승인 요청", f"유저: <@{i2.user.id}>\n입금자명: {name}\n금액: {amt:,}원", 0xf59e0b))
+                    await ch.send(embed=emb("충전 승인 요청", f"유저: <@{i2.user.id}>\n입금자명: {name}\n금액: {amt:,}원", 0xf59e0b))
         return await inter.response.send_modal(BankModal())
 
     if cid == "buy":
@@ -340,5 +340,9 @@ async def on_interaction(inter: discord.Interaction):
                     s2.add(o); s2.commit()
                 finally:
                     s2.close()
-                await i2.response.send_message(embed=E("구매 신청 완료","구매 수량은 채팅에 숫자로 입력해줘(에페메랄)."), ephemeral=True)
+                await i2.response.send_message(embed=emb("구매 신청 완료","구매 수량은 채팅에 숫자로 입력해줘(에페메랄)."), ephemeral=True)
         return await inter.response.send_modal(BuyModal())
+
+# ===== 로컬 단독 실행 안내 =====
+if __name__ == "__main__":
+    print("Docker CMD로 uvicorn과 함께 실행하세요.")
