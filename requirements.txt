@@ -5,3 +5,7 @@ SQLAlchemy==2.0.34
 psycopg2-binary==2.9.9
 python-dotenv==1.0.1
 httpx==0.27.2
+typing-extensions>=4.10.0  # 일부 런타임에서 필요
+setuptools>=68.0.0  # 빌드 휠 관련 안정화
+wheel>=0.41.0  # 빌드/설치 속도 안정화
+BUILD_TS=2025-09-26-19-25 (캐시 무력화용 주석, 값 바꾸면 새로 설치됨)
