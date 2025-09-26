@@ -7,9 +7,9 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
-# ===== 고정 설정 =====
+# ===== 고정 설정(길드) =====
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-GUILD_ID = 1419200424636055592  # ← 길드 고정
+GUILD_ID = 1419200424636055592  # 네 길드 고정
 SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
 REVIEW_WEBHOOK_URL = os.getenv("REVIEW_WEBHOOK_URL", "")
@@ -66,24 +66,29 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 def db() -> Session: return SessionLocal()
+
 def ensure_user(s: Session, did: str) -> User:
     u = s.get(User, did)
     if not u:
         u = User(discord_id=did); s.add(u); s.commit(); s.refresh(u)
     return u
+
 def get_settings(s: Session) -> Setting:
     x = s.get(Setting, 1)
     if not x:
         x = Setting(id=1, bank_name="미설정", account_number="미설정", holder="미설정", total_stock_rbx=0)
         s.add(x); s.commit(); s.refresh(x)
     return x
+
 def stock_text(s: Session) -> str:
     st = get_settings(s)
     return f"재고 : ```총 재고: {st.total_stock_rbx} R$```\n아래 버튼을 눌려 이용해 주세요"
+
 def set_or_inc_stock(s: Session, value: int, mode: str = "set"):
     st = get_settings(s)
     st.total_stock_rbx = max(0, value) if mode == "set" else max(0, (st.total_stock_rbx or 0) + value)
     s.commit()
+
 def dec_stock_exact(s: Session, need: int) -> tuple[bool, str]:
     if need <= 0: return False, "요청 수량이 0 이하야."
     st = get_settings(s); cur = int(st.total_stock_rbx or 0)
@@ -116,7 +121,48 @@ def make_panel_embed() -> discord.Embed:
         return discord.Embed(title="[ 24 ] 로벅스 자판기", description=stock_text(s), color=0x2b6cb0)
     finally: s.close()
 
-# ===== 명령어(길드 바운드) =====
+# ===== 길드 강제 동기화(짧고 확실) =====
+async def sync_guild_commands():
+    try:
+        await bot.tree.sync(guild=guild_obj)
+        print(f"✅ 길드 동기화 성공: {GUILD_ID}"); return
+    except Exception as e:
+        print(f"⚠️ 길드 동기화 실패 → 글로벌 폴백: {e}")
+    try:
+        await bot.tree.sync()
+        print("✅ 글로벌 동기화 성공"); return
+    except Exception as e:
+        print(f"⚠️ 글로벌 동기화 실패 → 재시도: {e}")
+    await asyncio.sleep(2)
+    try:
+        await bot.tree.sync(guild=guild_obj)
+        print(f"✅ 길드 동기화 재시도 성공: {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ 최종 동기화 실패: {e}")
+
+@bot.event
+async def on_ready():
+    init_db()
+    _ = bot.tree.get_commands()
+    await sync_guild_commands()
+    if not refresh_task.is_running(): refresh_task.start()
+    print(f"✅ 봇 로그인 성공: {bot.user}")
+
+@tasks.loop(seconds=60)
+async def refresh_task():
+    s = db()
+    try:
+        st = get_settings(s)
+        if not st.panel_channel_id or not st.panel_message_id: return
+        ch = bot.get_channel(int(st.panel_channel_id)) or await bot.fetch_channel(int(st.panel_channel_id))
+        msg = await ch.fetch_message(int(st.panel_message_id))
+        emb = msg.embeds[0] if msg.embeds else make_panel_embed()
+        emb.title = "[ 24 ] 로벅스 자판기"; emb.description = stock_text(s)
+        await msg.edit(embed=emb)
+    except: pass
+    finally: s.close()
+
+# ===== 슬래시(길드 바운드) =====
 @bot.tree.command(name="버튼패널", description="로벅스 패널 게시 (관리자 전용)", guild=guild_obj)
 @app_commands.check(lambda i: is_admin(i))
 async def 버튼패널(inter: discord.Interaction):
@@ -307,46 +353,7 @@ async def on_message(message: discord.Message):
             except: pass
     await bot.process_commands(message)
 
-# ===== 동기화 + 실행 =====
-async def sync_guild_commands():
-    # 길드 우선 → 실패 시 글로벌 → 1회 재시도
-    try:
-        await bot.tree.sync(guild=guild_obj)
-        print(f"✅ 길드 동기화 성공: {GUILD_ID}"); return
-    except Exception as e:
-        print(f"⚠️ 길드 동기화 실패 → 글로벌 폴백: {e}")
-    try:
-        await bot.tree.sync(); print("✅ 글로벌 동기화 성공"); return
-    except Exception as e:
-        print(f"⚠️ 글로벌 동기화 실패 → 재시도: {e}")
-    await asyncio.sleep(2)
-    try:
-        await bot.tree.sync(guild=guild_obj)
-        print(f"✅ 길드 동기화 재시도 성공: {GUILD_ID}")
-    except Exception as e:
-        print(f"❌ 최종 동기화 실패: {e}")
-
-@bot.event
-async def on_ready():
-    init_db()
-    await sync_guild_commands()
-    if not refresh_task.is_running(): refresh_task.start()
-    print(f"✅ 봇 로그인 성공: {bot.user}")
-
-@tasks.loop(seconds=60)
-async def refresh_task():
-    s = db()
-    try:
-        st = get_settings(s)
-        if not st.panel_channel_id or not st.panel_message_id: return
-        ch = bot.get_channel(int(st.panel_channel_id)) or await bot.fetch_channel(int(st.panel_channel_id))
-        msg = await ch.fetch_message(int(st.panel_message_id))
-        emb = msg.embeds[0] if msg.embeds else make_panel_embed()
-        emb.title = "[ 24 ] 로벅스 자판기"; emb.description = stock_text(s)
-        await msg.edit(embed=emb)
-    except: pass
-    finally: s.close()
-
+# ===== 실행(uvicorn 모듈 방식) =====
 def run_web_bg():
     cmd = ["python","-m","uvicorn","main:api","--host","0.0.0.0","--port",str(PORT)]
     return subprocess.Popen(cmd)
