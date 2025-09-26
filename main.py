@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
-# ========= 환경변수 =========
+# ========= 환경변수 ========
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 GUILD_ID = int(os.getenv("GUILD_ID", "0") or 0)  # 길드 고정(선택)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
