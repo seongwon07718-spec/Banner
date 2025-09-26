@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
-# ===== 고정/환경 =====
+# ===== 고정/환경 ====
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 GUILD_ID = 1419200424636055592
 SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
