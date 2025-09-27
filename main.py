@@ -8,17 +8,19 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-print(">>> main.py booting...")
+if not os.getenv("BOOT_LOG_ONCE"):
+    print(">>> main.py booting...")
+    os.environ["BOOT_LOG_ONCE"] = "1"
 
 # ===== 환경/고정 =====
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-GUILD_ID = 1419200424636055592  # 길드 고정
+GUILD_ID = 1419200424636055592
 SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
 REVIEW_WEBHOOK_URL = os.getenv("REVIEW_WEBHOOK_URL", "")
 BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
 
-# 영구 DB: /data 마운트 전제
+# 영구 DB: /data 마운트
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
@@ -37,7 +39,7 @@ class User(Base):
 
 class Order(Base):
     __tablename__ = "orders"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoinCREMENT=True)
     discord_id = Column(String, index=True)
     roblox_nick = Column(String)
     method = Column(String)
@@ -47,7 +49,7 @@ class Order(Base):
 
 class Topup(Base):
     __tablename__ = "topups"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoinCREMENT=True)
     discord_id = Column(String, index=True)
     depositor_name = Column(String)
     amount = Column(Integer, default=0)
