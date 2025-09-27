@@ -18,9 +18,9 @@ if not os.getenv("BOOT_LOG_ONCE"):
     print(">>> main.py booting...")
     os.environ["BOOT_LOG_ONCE"] = "1"
 
-# ===== 고정 값(네 서버/관리자) =====
+# ===== 고정 값 =====
 GUILD_ID = 1419200424636055592
-OWNER_ID = 1419336030175232071  # 이 유저도 관리자 판정
+OWNER_ID = 1419336030175232071  # 관리자 유저 ID
 
 # ===== 환경 변수 =====
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
@@ -31,7 +31,7 @@ BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
-# ===== DB 정의 =====
+# ===== DB =====
 Base = declarative_base()
 engine = create_engine(
     DATABASE_URL,
@@ -120,7 +120,6 @@ def set_or_inc_stock(s: Session, value: int, mode: str = "set"):
         raise ValueError("mode must be set|inc|dec")
     s.commit()
 
-# ===== embed/webhook 유틸 =====
 def emb(title: str, desc: str, color: int = 0x2b6cb0) -> discord.Embed:
     return discord.Embed(title=title, description=desc, color=color)
 
@@ -141,20 +140,17 @@ def health():
 
 # ===== Discord Bot =====
 intents = discord.Intents.default()
-# message_content가 필요 없으면 꺼두는 게 안정적
+# message_content 기능 안 쓰므로 꺼둠(권한 이슈 최소화)
 # intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 guild_obj = discord.Object(id=GUILD_ID)
 
 def is_admin(inter: discord.Interaction) -> bool:
     try:
-        # 서버 소유자(지정) 우선 허용
         if getattr(inter.user, "id", 0) == OWNER_ID:
             return True
-        # 서버 관리 권한
         if getattr(inter.user, "guild_permissions", None) and inter.user.guild_permissions.manage_guild:
             return True
-        # 특정 역할
         if ADMIN_ROLE_ID:
             rid = int(ADMIN_ROLE_ID)
             return any(getattr(r, "id", None) == rid for r in getattr(inter.user, "roles", []))
@@ -162,7 +158,6 @@ def is_admin(inter: discord.Interaction) -> bool:
         pass
     return False
 
-# ===== 패널 뷰/임베드 =====
 def panel_embed() -> discord.Embed:
     s = db()
     try:
@@ -177,7 +172,6 @@ def build_panel_view() -> discord.ui.View:
     v.add_item(discord.ui.Button(custom_id="myinfo",label="내 정보",    style=discord.ButtonStyle.secondary))
     return v
 
-# ===== 공통 응답 유틸 =====
 async def safe_ack(inter: discord.Interaction, ephemeral: bool = True):
     try:
         if not inter.response.is_done():
@@ -198,7 +192,6 @@ async def send_embed(inter: discord.Interaction, title: str, desc: str, ephemera
         except Exception:
             traceback.print_exc()
 
-# ===== 자동 패널 갱신 =====
 @tasks.loop(seconds=60)
 async def refresh_task():
     s = db()
@@ -214,7 +207,7 @@ async def refresh_task():
     finally:
         s.close()
 
-# ===== 슬래시 명령어 =====
+# ===== 슬래시 =====
 @bot.tree.command(name="버튼패널", description="로벅스 패널 게시 (관리자 전용)", guild=guild_obj)
 @app_commands.check(lambda i: is_admin(i))
 async def 버튼패널(inter: discord.Interaction):
@@ -307,7 +300,7 @@ async def 잔액차감(inter: discord.Interaction, 유저: discord.User, 차감�
 async def 잔액차감_error(inter: discord.Interaction, error: Exception):
     await send_embed(inter, "권한 없음", "관리자만 사용할 수 있어요.", ephemeral=True, color=0xff5555)
 
-# ===== 버튼 처리(필수 콜백만 구현) =====
+# ===== 버튼 처리 =====
 @bot.event
 async def on_interaction(inter: discord.Interaction):
     if inter.type != discord.InteractionType.component:
@@ -330,7 +323,6 @@ async def on_interaction(inter: discord.Interaction):
                 ephemeral=True
             )
         if cid == "topup":
-            # 간단 모달(입금자명/금액)
             class BankModal(discord.ui.Modal, title="충전 신청"):
                 depositor = discord.ui.TextInput(label="입금자명", max_length=32)
                 amount = discord.ui.TextInput(label="충전금액(원)", max_length=12)
@@ -373,7 +365,7 @@ async def on_interaction(inter: discord.Interaction):
     finally:
         s.close()
 
-# ===== 상태/동기화 =====
+# ===== 동기화/상태 =====
 async def sync_guild_commands():
     try:
         cmds = await bot.tree.sync(guild=guild_obj)
@@ -399,7 +391,7 @@ async def on_ready():
     except Exception:
         traceback.print_exc()
 
-# ===== 멀티 프로세스 실행 =====
+# ===== 멀티 실행 =====
 def run_api():
     uvicorn.run("main:api", host="0.0.0.0", port=8000)
 
