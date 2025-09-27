@@ -39,7 +39,7 @@ class User(Base):
 
 class Order(Base):
     __tablename__ = "orders"
-    id = Column(Integer, primary_key=True, autoinCREMENT=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)  # FIXED
     discord_id = Column(String, index=True)
     roblox_nick = Column(String)
     method = Column(String)
@@ -49,7 +49,7 @@ class Order(Base):
 
 class Topup(Base):
     __tablename__ = "topups"
-    id = Column(Integer, primary_key=True, autoinCREMENT=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)  # FIXED
     discord_id = Column(String, index=True)
     depositor_name = Column(String)
     amount = Column(Integer, default=0)
@@ -225,7 +225,7 @@ async def 버튼패널(inter: discord.Interaction):
             st.secure_channel_id = str(SECURE_CHANNEL_ID)
         if REVIEW_WEBHOOK_URL and not st.review_webhook_url:
             st.review_webhook_url = REVIEW_WEBHOOK_URL
-        if BUYLOG_WEBHOOK_URL and not st.buylog_webhook_url:
+        if BUYLOG_WEBHOOK_URL and not st.buylog_webHOOK_url:
             st.buylog_webhook_url = BUYLOG_WEBHOOK_URL
         s.commit()
     finally:
@@ -345,7 +345,7 @@ async def on_interaction(inter: discord.Interaction):
                 await i2.response.send_message(embed=emb("구매 신청 완료","구매 수량은 채팅에 숫자로 입력해줘(에페메랄)."), ephemeral=True)
         return await inter.response.send_modal(BuyModal())
 
-# ===== 컨테이너 직실행 방지(로컬 테스트 전용) =====
+# ===== 컨테이너 직실행 방지(로컬 전용) =====
 if __name__ == "__main__":
     if os.getenv("DOCKERIZED") != "1":
         print("Docker CMD로 uvicorn과 함께 실행하세요.")
