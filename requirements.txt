@@ -1,5 +1,7 @@
 discord.py==2.4.0
-sqlalchemy==2.0.34
+SQLAlchemy==2.0.34
 fastapi==0.115.2
-uvicorn==0.30.6
+uvicorn[standard]==0.30.6
 aiohttp==3.10.5
+# 음성 안 쓸 거면 PyNaCl는 설치 안 해도 됨
+# PyNaCl==1.5.0
