@@ -8,13 +8,12 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 import aiohttp
 
-# ===== 로깅 =====
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 if not os.getenv("BOOT_LOG_ONCE"):
     print(">>> main.py booting...")
     os.environ["BOOT_LOG_ONCE"] = "1"
 
-# ===== 환경 변수 =====
+# 환경 변수
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
@@ -22,10 +21,9 @@ ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
 REVIEW_WEBHOOK_URL = os.getenv("REVIEW_WEBHOOK_URL", "")
 BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
 
-# ===== DB =====
+# DB 설정
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
-
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -45,7 +43,7 @@ class Order(Base):
     roblox_nick = Column(String)
     method = Column(String)
     amount_rbx = Column(Integer, default=0)
-    status = Column(String, default="requested")  # requested → approved/rejected
+    status = Column(String, default="requested")
     created_at = Column(DateTime, server_default=func.now())
 
 class Topup(Base):
@@ -54,7 +52,7 @@ class Topup(Base):
     discord_id = Column(String, index=True)
     depositor_name = Column(String)
     amount = Column(Integer, default=0)
-    status = Column(String, default="waiting")  # waiting → approved/rejected
+    status = Column(String, default="waiting")
     created_at = Column(DateTime, server_default=func.now())
 
 class Setting(Base):
@@ -113,19 +111,18 @@ def set_or_inc_stock(s: Session, value: int, mode: str = "set"):
 def emb(title: str, desc: str, color: int = 0x2b6cb0) -> discord.Embed:
     return discord.Embed(title=title, description=desc, color=color)
 
-# ===== FastAPI =====
+# FastAPI
 api = FastAPI()
 @api.get("/health")
 def health():
     return {"ok": True}
 
-# ===== Discord Bot =====
+# Discord Bot
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 guild_obj = discord.Object(id=GUILD_ID)
 
-# ===== 유틸 =====
 async def safe_ack(inter: discord.Interaction, ephemeral: bool = True):
     try:
         if not inter.response.is_done():
@@ -176,7 +173,7 @@ class ApproveRejectView(discord.ui.View):
     @discord.ui.button(label="승인", style=discord.ButtonStyle.success, custom_id="approve_btn")
     async def approve(self, inter: discord.Interaction, btn: discord.ui.Button):
         if not is_admin(inter):
-            return await send_embed(inter, "오류", "관리자만 승인할 수 있어.", True, 0xff0000)
+            return await send_embed(inter, "오류", "관리자만 승인 가능", True, 0xff0000)
         s = db()
         try:
             if self.entry_type == "order":
@@ -184,12 +181,11 @@ class ApproveRejectView(discord.ui.View):
                 if entry and entry.status == "requested":
                     st = get_settings(s)
                     if st.total_stock_rbx >= entry.amount_rbx:
-                        set_or_inc_stock(s, entry.amount_rbx, "dec")  # ✅ 승인 시 차감
+                        set_or_inc_stock(s, entry.amount_rbx, "dec")
                         entry.status = "approved"
                         s.commit()
-                        embed = emb("주문 승인됨", f"{entry.roblox_nick} ({entry.amount_rbx} R$)")
-                        await send_webhook(get_settings(s).buylog_webhook_url, embed)
-                        await send_embed(inter, "완료", "주문이 승인되었어.", True)
+                        await send_webhook(get_settings(s).buylog_webhook_url, emb("주문 승인", f"{entry.roblox_nick} ({entry.amount_rbx} R$)"))
+                        await send_embed(inter, "완료", "주문 승인됨", True)
             elif self.entry_type == "topup":
                 entry = s.query(Topup).filter_by(id=self.entry_id).first()
                 if entry and entry.status == "waiting":
@@ -197,16 +193,15 @@ class ApproveRejectView(discord.ui.View):
                     u.balance += entry.amount
                     entry.status = "approved"
                     s.commit()
-                    embed = emb("충전 승인됨", f"{entry.depositor_name} → {entry.amount}원")
-                    await send_webhook(get_settings(s).review_webhook_url, embed)
-                    await send_embed(inter, "완료", "충전이 승인되었어.", True)
+                    await send_webhook(get_settings(s).review_webhook_url, emb("충전 승인", f"{entry.depositor_name} → {entry.amount}원"))
+                    await send_embed(inter, "완료", "충전 승인됨", True)
         finally:
             s.close()
 
     @discord.ui.button(label="거절", style=discord.ButtonStyle.danger, custom_id="reject_btn")
     async def reject(self, inter: discord.Interaction, btn: discord.ui.Button):
         if not is_admin(inter):
-            return await send_embed(inter, "오류", "관리자만 거절할 수 있어.", True, 0xff0000)
+            return await send_embed(inter, "오류", "관리자만 거절 가능", True, 0xff0000)
         s = db()
         try:
             if self.entry_type == "order":
@@ -214,13 +209,13 @@ class ApproveRejectView(discord.ui.View):
                 if entry and entry.status == "requested":
                     entry.status = "rejected"
                     s.commit()
-                    await send_embed(inter, "거절됨", "주문이 거절되었어.", True, 0xff0000)
+                    await send_embed(inter, "거절됨", "주문 거절됨", True, 0xff0000)
             elif self.entry_type == "topup":
                 entry = s.query(Topup).filter_by(id=self.entry_id).first()
                 if entry and entry.status == "waiting":
                     entry.status = "rejected"
                     s.commit()
-                    await send_embed(inter, "거절됨", "충전이 거절되었어.", True, 0xff0000)
+                    await send_embed(inter, "거절됨", "충전 거절됨", True, 0xff0000)
         finally:
             s.close()
 
@@ -228,15 +223,15 @@ class ApproveRejectView(discord.ui.View):
 def panel_embed() -> discord.Embed:
     s = db()
     try:
-        return emb("[ 24 ] 로벅스 자판기", f"재고 안내\n```{stock_text(s)}```\n아래 버튼으로 이용해줘.")
+        return emb("[24] 로벅스 자판기", f"재고 안내\n```{stock_text(s)}```\n아래 버튼 이용")
     finally:
         s.close()
 
 def build_panel_view() -> discord.ui.View:
     v = discord.ui.View(timeout=None)
-    v.add_item(discord.ui.Button(custom_id="buy",   label="로벅스 구매", style=discord.ButtonStyle.secondary))
-    v.add_item(discord.ui.Button(custom_id="topup", label="충전",       style=discord.ButtonStyle.secondary))
-    v.add_item(discord.ui.Button(custom_id="myinfo",label="내 정보",    style=discord.ButtonStyle.secondary))
+    v.add_item(discord.ui.Button(custom_id="buy", label="로벅스 구매", style=discord.ButtonStyle.secondary))
+    v.add_item(discord.ui.Button(custom_id="topup", label="충전", style=discord.ButtonStyle.secondary))
+    v.add_item(discord.ui.Button(custom_id="myinfo", label="내 정보", style=discord.ButtonStyle.secondary))
     return v
 
 # ===== 이벤트 =====
@@ -300,10 +295,11 @@ async def 버튼패널(inter: discord.Interaction):
         s.commit()
     finally:
         s.close()
-    await send_embed(inter, "완료", "패널이 게시됐어.", ephemeral=True)
+    await send_embed(inter, "완료", "패널 게시됨", ephemeral=True)
 
 # ===== 실행 =====
-if DISCORD_TOKEN:
-    asyncio.create_task(bot.start(DISCORD_TOKEN))
-else:
-    print("❌ DISCORD_TOKEN 환경 변수가 없습니다.")
+if __name__ == "__main__":
+    if DISCORD_TOKEN:
+        asyncio.run(bot.start(DISCORD_TOKEN))
+    else:
+        print("❌ DISCORD_TOKEN 환경 변수 없음")
