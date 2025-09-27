@@ -2,7 +2,6 @@ import os, sys, asyncio, traceback, logging
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from fastapi import FastAPI
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
@@ -10,7 +9,7 @@ import aiohttp
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 if not os.getenv("BOOT_LOG_ONCE"):
-    print(">>> main.py booting...")
+    print(">>> bot.py booting...")
     os.environ["BOOT_LOG_ONCE"] = "1"
 
 # ===== 환경 변수 =====
@@ -75,7 +74,6 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 def db() -> Session: return SessionLocal()
-
 def ensure_user(s: Session, did: str) -> User:
     u = s.get(User, did)
     if not u:
@@ -110,12 +108,7 @@ async def send_webhook(url: str, content: str):
         try: await session.post(url, json={"content": content})
         except: traceback.print_exc()
 
-# ===== FastAPI =====
-api = FastAPI()
-@api.get("/health")
-def health(): return {"ok": True}
-
-# ===== Discord =====
+# ===== Discord Bot =====
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -158,7 +151,6 @@ def build_panel_view():
     v.add_item(discord.ui.Button(label="내 정보", style=discord.ButtonStyle.secondary, custom_id="myinfo"))
     return v
 
-# ===== 자동 패널 갱신 =====
 @tasks.loop(seconds=60)
 async def refresh_task():
     s = db()
@@ -170,7 +162,7 @@ async def refresh_task():
         await msg.edit(embed=panel_embed(), view=build_panel_view())
     finally: s.close()
 
-# ===== 슬래시 명령어 =====
+# ===== 슬래시 명령어 (관리자용) =====
 @bot.tree.command(name="버튼패널", description="로벅스 패널 게시 (관리자 전용)", guild=guild_obj)
 @app_commands.check(lambda i: is_admin(i))
 async def 버튼패널(inter: discord.Interaction):
@@ -181,29 +173,27 @@ async def 버튼패널(inter: discord.Interaction):
         st = get_settings(s)
         st.panel_channel_id = str(msg.channel.id)
         st.panel_message_id = str(msg.id)
-        if SECURE_CHANNEL_ID and not st.secure_channel_id:
-            st.secure_channel_id = str(SECURE_CHANNEL_ID)
-        if REVIEW_WEBHOOK_URL and not st.review_webhook_url:
-            st.review_webhook_url = REVIEW_WEBHOOK_URL
-        if BUYLOG_WEBHOOK_URL and not st.buylog_webhook_url:
-            st.buylog_webhook_url = BUYLOG_WEBHOOK_URL
+        if SECURE_CHANNEL_ID and not st.secure_channel_id: st.secure_channel_id = str(SECURE_CHANNEL_ID)
+        if REVIEW_WEBHOOK_URL and not st.review_webhook_url: st.review_webhook_url = REVIEW_WEBHOOK_URL
+        if BUYLOG_WEBHOOK_URL and not st.buylog_webhook_url: st.buylog_webhook_url = BUYLOG_WEBHOOK_URL
         s.commit()
     finally: s.close()
     await send_embed(inter, "완료", "패널이 게시됐어.")
 
+# 재고 조정
 @bot.tree.command(name="재고추가", description="총 재고 설정/증가/감소 (관리자 전용)", guild=guild_obj)
 @app_commands.describe(수량="변경 수량(R$)", 모드="set=설정, inc=증가, dec=감소")
 @app_commands.choices(모드=[
-    app_commands.Choice(name="설정", value="set"),
-    app_commands.Choice(name="증가", value="inc"),
-    app_commands.Choice(name="감소", value="dec"),
+    app_commands.Choice(name="설정(덮어쓰기)", value="set"),
+    app_commands.Choice(name="증가(+)", value="inc"),
+    app_commands.Choice(name="감소(-)", value="dec"),
 ])
 @app_commands.check(lambda i: is_admin(i))
 async def 재고추가(inter: discord.Interaction, 수량: int, 모드: app_commands.Choice[str]):
     await safe_ack(inter)
     s = db()
     try:
-        set_or_inc_stock(s, 수량, mode=모드.value)
+        set_or_inc_stock(s, 수량, 모드.value)
         st = get_settings(s)
         if st.panel_channel_id and st.panel_message_id:
             ch = bot.get_channel(int(st.panel_channel_id)) or await bot.fetch_channel(int(st.panel_channel_id))
@@ -213,6 +203,7 @@ async def 재고추가(inter: discord.Interaction, 수량: int, 모드: app_comm
     finally: s.close()
     await send_embed(inter, "재고 변경", f"모드: {모드.value}\n수량: {수량}\n현재 {cur}")
 
+# 유저 정보
 @bot.tree.command(name="유저정보", description="특정 유저 정보 조회 (관리자 전용)", guild=guild_obj)
 @app_commands.describe(유저="대상 유저")
 @app_commands.check(lambda i: is_admin(i))
@@ -225,12 +216,14 @@ async def 유저정보(inter: discord.Interaction, 유저: discord.User):
     finally: s.close()
     await send_embed(inter, "유저 정보", desc)
 
+# 잔액 차감
 @bot.tree.command(name="잔액차감", description="유저 잔액 차감 (관리자 전용)", guild=guild_obj)
 @app_commands.describe(유저="대상 유저", 차감금액="차감할 금액(원)")
 @app_commands.check(lambda i: is_admin(i))
 async def 잔액차감(inter: discord.Interaction, 유저: discord.User, 차감금액: int):
     await safe_ack(inter)
-    if 차감금액 <= 0: return await send_embed(inter, "오류", "차감금액은 1 이상이어야 해.", ephemeral=True, color=0xff5555)
+    if 차감금액 <= 0:
+        return await send_embed(inter, "오류", "차감금액은 1 이상이어야 해.", ephemeral=True, color=0xff5555)
     s = db()
     try:
         u = ensure_user(s, str(유저.id))
@@ -242,23 +235,64 @@ async def 잔액차감(inter: discord.Interaction, 유저: discord.User, 차감�
     finally: s.close()
     await send_embed(inter, "잔액 차감 완료", desc)
 
-# ===== on_ready =====
+# ===== 버튼/모달 처리 (구매/충전/내정보) =====
 @bot.event
-async def on_ready():
+async def on_interaction(inter: discord.Interaction):
+    if inter.type != discord.InteractionType.component: return
+    cid = inter.data.get("custom_id", "")
+    await safe_ack(inter)
+
+    s = db()
     try:
-        init_db()
-        await bot.tree.sync(guild=guild_obj)
-        if not refresh_task.is_running(): refresh_task.start()
-        print(f"✅ 봇 로그인 성공: {bot.user}")
-    except Exception: traceback.print_exc()
+        if cid == "myinfo":
+            u = ensure_user(s, str(inter.user.id))
+            desc = f"유저: {inter.user.mention}\n잔액: {u.balance:,}원\n누적: {u.total_spent:,}원\n등급: {u.tier}"
+            await send_embed(inter, "내 정보", desc)
 
-# ===== 봇 + FastAPI 동시 실행 =====
-async def start_bot_and_api():
-    bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
-    import uvicorn
-    api_task = asyncio.create_task(uvicorn.run(api, host="0.0.0.0", port=8000))
-    await asyncio.gather(bot_task, api_task)
+        elif cid == "topup":
+            class BankModal(discord.ui.Modal, title="충전 신청"):
+                depositor = discord.ui.TextInput(label="입금자명", placeholder="홍길동", max_length=32)
+                amount   = discord.ui.TextInput(label="충전금액", placeholder="30000", max_length=12)
+                async def on_submit(self, i2: discord.Interaction):
+                    name = str(self.depositor.value).strip()
+                    try: amt = int(str(self.amount.value).replace(",", "").strip())
+                    except: return await i2.response.send_message(embed=emb("오류","금액 형식이 올바르지 않아.",0xff5555), ephemeral=True)
+                    s2 = db()
+                    try:
+                        t = Topup(discord_id=str(i2.user.id), depositor_name=name, amount=amt, status="waiting")
+                        s2.add(t); s2.commit(); s2.refresh(t)
+                        st2 = get_settings(s2)
+                        bank_info = f"- 은행: {st2.bank_name}\n- 계좌: {st2.account_number}\n- 예금주: {st2.holder}"
+                        secure_ch_id = int(st2.secure_channel_id or 0) or SECURE_CHANNEL_ID
+                    finally: s2.close()
+                    await i2.response.send_message(embed=emb("충전 신청 완료", bank_info), ephemeral=True)
+                    if secure_ch_id:
+                        ch = bot.get_channel(secure_ch_id) or await bot.fetch_channel(secure_ch_id)
+                        await ch.send(embed=emb("충전 승인 요청", f"유저: <@{i2.user.id}>\n입금자명: {name}\n금액: {amt:,}원", 0xf59e0b))
+                        await send_webhook(REVIEW_WEBHOOK_URL, f"충전 신청: <@{i2.user.id}> {amt:,}원")
 
+            await inter.response.send_modal(BankModal())
+
+        elif cid == "buy":
+            class BuyModal(discord.ui.Modal, title="로벅스 구매 신청"):
+                method = discord.ui.TextInput(label="지급방식", placeholder="그룹펀드/기타", max_length=50)
+                nick   = discord.ui.TextInput(label="로블 닉", placeholder="RobloxNickname", max_length=50)
+                async def on_submit(self, i2: discord.Interaction):
+                    m = str(self.method.value).strip()
+                    n = str(self.nick.value).strip()
+                    s2 = db()
+                    try:
+                        o = Order(discord_id=str(i2.user.id), method=m, roblox_nick=n, status="requested")
+                        s2.add(o); s2.commit()
+                    finally: s2.close()
+                    await i2.response.send_message(embed=emb("구매 신청 완료","구매 수량은 채팅에 숫자로 입력해줘."), ephemeral=True)
+                    await send_webhook(BUYLOG_WEBHOOK_URL, f"구매 신청: <@{i2.user.id}> 닉:{n}, 방식:{m}")
+
+            await inter.response.send_modal(BuyModal())
+
+    finally: s.close()
+
+# ===== 봇 실행 =====
 if __name__ == "__main__":
     if not DISCORD_TOKEN: print("❌ DISCORD_TOKEN 환경 변수 없음")
-    else: asyncio.run(start_bot_and_api())
+    else: asyncio.run(bot.start(DISCORD_TOKEN))
