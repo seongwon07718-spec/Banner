@@ -343,6 +343,7 @@ async def on_interaction(inter: discord.Interaction):
                 await i2.response.send_message(embed=emb("구매 신청 완료","구매 수량은 채팅에 숫자로 입력해줘(에페메랄)."), ephemeral=True)
         return await inter.response.send_modal(BuyModal())
 
-# ===== 로컬 단독 실행 안내 =====
+# ===== 컨테이너 직실행 방지(로컬 테스트 전용) =====
 if __name__ == "__main__":
-    print("Docker CMD로 uvicorn과 함께 실행하세요.")
+    if os.getenv("DOCKERIZED") != "1":
+        print("Docker CMD로 uvicorn과 함께 실행하세요.")
