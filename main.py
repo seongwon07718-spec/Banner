@@ -13,14 +13,15 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.sql import func
 
+# ===== 로깅 =====
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 if not os.getenv("BOOT_LOG_ONCE"):
     print(">>> main.py booting...")
     os.environ["BOOT_LOG_ONCE"] = "1"
 
-# ===== 고정 값 =====
+# ===== 고정(네 서버/관리자) =====
 GUILD_ID = 1419200424636055592
-OWNER_ID = 1419336030175232071  # 관리자 유저 ID
+OWNER_ID = 1419336030175232071  # 네 관리자 유저 ID
 
 # ===== 환경 변수 =====
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
@@ -28,6 +29,8 @@ SECURE_CHANNEL_ID = int(os.getenv("SECURE_CHANNEL_ID", "0") or 0)
 ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "")
 REVIEW_WEBHOOK_URL = os.getenv("REVIEW_WEBHOOK_URL", "")
 BUYLOG_WEBHOOK_URL = os.getenv("BUYLOG_WEBHOOK_URL", "")
+
+# DB 파일은 영구볼륨(/data)에 저장
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
@@ -120,6 +123,7 @@ def set_or_inc_stock(s: Session, value: int, mode: str = "set"):
         raise ValueError("mode must be set|inc|dec")
     s.commit()
 
+# ===== 임베드/웹훅 =====
 def emb(title: str, desc: str, color: int = 0x2b6cb0) -> discord.Embed:
     return discord.Embed(title=title, description=desc, color=color)
 
@@ -140,7 +144,7 @@ def health():
 
 # ===== Discord Bot =====
 intents = discord.Intents.default()
-# message_content 기능 안 쓰므로 꺼둠(권한 이슈 최소화)
+# message_content 안 씀 → 권한 이슈 최소화
 # intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 guild_obj = discord.Object(id=GUILD_ID)
@@ -158,6 +162,7 @@ def is_admin(inter: discord.Interaction) -> bool:
         pass
     return False
 
+# ===== 패널 뷰/임베드 =====
 def panel_embed() -> discord.Embed:
     s = db()
     try:
@@ -172,6 +177,7 @@ def build_panel_view() -> discord.ui.View:
     v.add_item(discord.ui.Button(custom_id="myinfo",label="내 정보",    style=discord.ButtonStyle.secondary))
     return v
 
+# ===== 공통 응답 유틸 =====
 async def safe_ack(inter: discord.Interaction, ephemeral: bool = True):
     try:
         if not inter.response.is_done():
@@ -192,6 +198,7 @@ async def send_embed(inter: discord.Interaction, title: str, desc: str, ephemera
         except Exception:
             traceback.print_exc()
 
+# ===== 자동 패널 갱신 =====
 @tasks.loop(seconds=60)
 async def refresh_task():
     s = db()
@@ -391,9 +398,18 @@ async def on_ready():
     except Exception:
         traceback.print_exc()
 
-# ===== 멀티 실행 =====
+# ===== 웹/봇 동시 실행 =====
 def run_api():
     uvicorn.run("main:api", host="0.0.0.0", port=8000)
+
+# 로그인 에러를 무조건 보여주기 위한 래퍼(원인 확정용)
+async def run_bot():
+    try:
+        await bot.start(DISCORD_TOKEN)
+    except Exception:
+        print("!!! 디스코드 로그인 실패 또는 초기화 예외 !!!")
+        traceback.print_exc()
+        raise
 
 if __name__ == "__main__":
     Thread(target=run_api, daemon=True).start()
@@ -402,10 +418,10 @@ if __name__ == "__main__":
         print("❌ DISCORD_TOKEN 환경 변수 없음")
         sys.exit(1)
     try:
-        asyncio.run(bot.start(DISCORD_TOKEN))
+        # 바로 에러가 보이도록 래퍼 사용
+        asyncio.run(run_bot())
     except KeyboardInterrupt:
         print("KeyboardInterrupt, exiting")
     except Exception:
-        print("!!! 디스코드 로그인 실패 또는 초기화 예외 !!!")
-        traceback.print_exc()
-        raise
+        # 위에서 이미 스택 찍음
+        pass
